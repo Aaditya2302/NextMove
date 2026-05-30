@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 
 export function useAudioRecorder() {
   const [isRecording, setIsRecording] = useState(false);
@@ -6,16 +6,85 @@ export function useAudioRecorder() {
   const [taskResult, setTaskResult] = useState(null);
   const [error, setError] = useState(null);
   const [analyser, setAnalyser] = useState(null);
+  const [allTasks, setAllTasks] = useState([]);
+  const [transcript, setTranscript] = useState('');
+  const [noTaskDetected, setNoTaskDetected] = useState(false);
+  const [isLoadingTasks, setIsLoadingTasks] = useState(true);
 
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const audioContextRef = useRef(null);
   const sourceRef = useRef(null);
 
+  const fetchTasks = useCallback(async () => {
+    try {
+      setIsLoadingTasks(true);
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+      const response = await fetch(`${apiUrl}/api/voice/tasks`);
+      const result = await response.json();
+      if (result.success) {
+        setAllTasks(result.data);
+      } else {
+        setError(result.message || 'Failed to fetch tasks');
+      }
+    } catch (err) {
+      console.error("Fetch tasks error:", err);
+      setError("Failed to fetch tasks from backend.");
+    } finally {
+      setIsLoadingTasks(false);
+    }
+  }, []);
+
+  const deleteTask = useCallback(async (id) => {
+    try {
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+      const response = await fetch(`${apiUrl}/api/voice/tasks/${id}`, {
+        method: 'DELETE',
+      });
+      const result = await response.json();
+      if (result.success) {
+        setAllTasks(prev => prev.filter(task => task._id !== id));
+      } else {
+        setError(result.message || 'Failed to delete task');
+      }
+    } catch (err) {
+      console.error("Delete task error:", err);
+      setError("Failed to delete task.");
+    }
+  }, []);
+
+  const updateTask = useCallback(async (id, fields) => {
+    try {
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+      const response = await fetch(`${apiUrl}/api/voice/tasks/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(fields),
+      });
+      const result = await response.json();
+      if (result.success) {
+        setAllTasks(prev => prev.map(task => task._id === id ? result.data : task));
+      } else {
+        setError(result.message || 'Failed to update task');
+      }
+    } catch (err) {
+      console.error("Update task error:", err);
+      setError("Failed to update task.");
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchTasks();
+  }, [fetchTasks]);
+
   const startRecording = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       setError(null);
+      setTranscript(''); // Clear transcript when new recording starts
+      setNoTaskDetected(false); // Clear no-task flag on new recording
       
       // Set up Audio Context and Analyser for 3D visuals
       const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -65,12 +134,25 @@ export function useAudioRecorder() {
           const result = await response.json();
           if (result.success) {
             setTaskResult(result.data);
+            setNoTaskDetected(false);
+            if (result.data) {
+              setTranscript(result.data.originalTranscript || '');
+              // Prepend new task to allTasks array
+              setAllTasks(prev => [result.data, ...prev]);
+            }
+          } else if (result.noTask) {
+            // Handle filtered/non-identified task gracefully
+            setNoTaskDetected(true);
+            setTaskResult(null);
+            setTranscript(result.transcript || '');
           } else {
             setError(result.message || 'Error processing audio');
+            setNoTaskDetected(false);
           }
         } catch (err) {
           console.error("Upload error:", err);
           setError("Failed to reach backend.");
+          setNoTaskDetected(false);
         } finally {
           setIsProcessing(false);
         }
@@ -98,7 +180,14 @@ export function useAudioRecorder() {
     taskResult,
     error,
     analyser,
+    allTasks,
+    transcript,
+    noTaskDetected,
+    isLoadingTasks,
     startRecording,
-    stopRecording
+    stopRecording,
+    fetchTasks,
+    deleteTask,
+    updateTask
   };
 }

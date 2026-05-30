@@ -24,6 +24,8 @@ Your goal is to listen to the user's raw voice transcript, transcribe it, and ex
    - Low importance -> Note
 6. Estimate a realistic time in minutes.
 7. Provide a confidence score between 0.0 and 1.0 reflecting how certain you are of the extraction.
+8. Assess the user's stress level based on the context, pacing, tone, and language of their request. Rate the stress level on a scale from 1 (completely calm) to 10 (extremely stressed or overwhelmed).
+9. Write a short, personalized 1-sentence motivational note (encouragement) tailored directly to the extracted task. E.g. "You've got this — one focused hour is all it takes."
 
 ### Output Format
 You MUST return ONLY a valid JSON object with the following structure, with NO extra text, NO markdown code blocks, and NO explanations.
@@ -34,7 +36,9 @@ You MUST return ONLY a valid JSON object with the following structure, with NO e
   "urgency": "high" | "low",
   "importance": "high" | "low",
   "estimatedTime": number,
-  "confidence": number
+  "confidence": number,
+  "stressLevel": number,
+  "encouragement": "string"
 }
 `;
 
@@ -70,8 +74,6 @@ exports.processVoice = async (req, res) => {
     }
 
     const audioPath = req.file.path;
-    // Multer sometimes sets mimetype as 'application/octet-stream' for some browsers if not set, 
-    // but Gemini supports common audio mimetypes like audio/webm, audio/mp3
     const mimeType = req.file.mimetype && req.file.mimetype.includes('audio/') ? req.file.mimetype : 'audio/webm';
 
     // Dummy Mode Fallback
@@ -86,13 +88,17 @@ exports.processVoice = async (req, res) => {
       await new Promise(resolve => setTimeout(resolve, 1500));
 
       const transcriptText = "I need to finish my NextMove project frontend today";
+      
+      // Feature 5 & 6 mock data
       const taskData = {
         title: "Finish NextMove frontend",
         type: "Action",
         urgency: "high",
         importance: "high",
         estimatedTime: 120,
-        confidence: 0.95
+        confidence: 0.95,
+        stressLevel: 7,
+        encouragement: "You've got this — one focused hour is all it takes."
       };
 
       const newTask = new Task({
@@ -112,7 +118,6 @@ exports.processVoice = async (req, res) => {
     // 1. Process Audio with Gemini
     let llmResponseText = "";
     try {
-      // Since Gemini handles both STT and LLM simultaneously, we'll use LLM_MODEL
       const modelName = process.env.LLM_MODEL || process.env.STT_MODEL || "gemini-1.5-flash";
       const model = genAI.getGenerativeModel({ model: modelName });
       const audioPart = fileToGenerativePart(audioPath, mimeType);
@@ -150,8 +155,18 @@ exports.processVoice = async (req, res) => {
       });
     }
 
-    const transcriptText = parsedData.transcript;
+    const transcriptText = parsedData.transcript || '';
     delete parsedData.transcript;
+
+    // Feature 2: Filter "No task identified" or low confidence extractions
+    if (parsedData.title === "No task identified" || (parsedData.confidence !== undefined && parsedData.confidence < 0.4)) {
+      return res.status(200).json({
+        success: false,
+        noTask: true,
+        message: 'No clear task detected. Try speaking more clearly.',
+        transcript: transcriptText
+      });
+    }
 
     // 3. Save Task to MongoDB
     try {
@@ -175,5 +190,52 @@ exports.processVoice = async (req, res) => {
   } catch (err) {
     console.error('Unexpected error in processVoice:', err);
     return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+};
+
+exports.getTasks = async (req, res) => {
+  try {
+    const tasks = await Task.find({}).sort({ createdAt: -1 });
+    return res.status(200).json({ success: true, data: tasks });
+  } catch (err) {
+    console.error('Error in getTasks:', err);
+    return res.status(500).json({ success: false, message: 'Failed to fetch tasks from database.' });
+  }
+};
+
+exports.deleteTask = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const deletedTask = await Task.findByIdAndDelete(id);
+    if (!deletedTask) {
+      return res.status(404).json({ success: false, message: 'Task not found.' });
+    }
+    return res.status(200).json({ success: true, message: 'Task deleted.' });
+  } catch (err) {
+    console.error('Error in deleteTask:', err);
+    return res.status(500).json({ success: false, message: 'Failed to delete task.' });
+  }
+};
+
+exports.updateTask = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, type, urgency, importance, estimatedTime } = req.body;
+    
+    const updates = {};
+    if (title !== undefined) updates.title = title;
+    if (type !== undefined) updates.type = type;
+    if (urgency !== undefined) updates.urgency = urgency;
+    if (importance !== undefined) updates.importance = importance;
+    if (estimatedTime !== undefined) updates.estimatedTime = estimatedTime;
+
+    const updatedTask = await Task.findByIdAndUpdate(id, updates, { new: true, runValidators: true });
+    if (!updatedTask) {
+      return res.status(404).json({ success: false, message: 'Task not found.' });
+    }
+    return res.status(200).json({ success: true, data: updatedTask });
+  } catch (err) {
+    console.error('Error in updateTask:', err);
+    return res.status(500).json({ success: false, message: 'Failed to update task.' });
   }
 };

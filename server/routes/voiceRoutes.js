@@ -1,6 +1,6 @@
 const express = require('express');
 const multer = require('multer');
-const { processVoice } = require('../controllers/voiceController');
+const { processVoice, getTasks, deleteTask, updateTask } = require('../controllers/voiceController');
 const fs = require('fs');
 
 const router = express.Router();
@@ -36,5 +36,14 @@ const upload = multer({
 // Example API Route: /api/voice/upload
 // The client should send the file with the field name 'audio'
 router.post('/upload', upload.single('audio'), processVoice);
+
+// GET /api/voice/tasks
+router.get('/tasks', getTasks);
+
+// DELETE /api/voice/tasks/:id
+router.delete('/tasks/:id', deleteTask);
+
+// PUT /api/voice/tasks/:id
+router.put('/tasks/:id', updateTask);
 
 module.exports = router;

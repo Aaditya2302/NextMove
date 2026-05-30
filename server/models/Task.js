@@ -35,6 +35,14 @@ const TaskSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  stressLevel: {
+    type: Number,
+    min: 1,
+    max: 10,
+  },
+  encouragement: {
+    type: String,
+  },
   createdAt: {
     type: Date,
     default: Date.now,
