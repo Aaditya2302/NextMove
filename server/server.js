@@ -7,6 +7,17 @@ const voiceRoutes = require('./routes/voiceRoutes');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// CORS
+const corsOption = {
+  origin: [
+    'http://localhost:5173',
+    'https://next-move-alpha.vercel.app'
+  ],
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  credentials: true,
+};
+
+
 // Middleware
 app.use(cors());
 app.use(express.json());
